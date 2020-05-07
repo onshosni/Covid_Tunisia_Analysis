@@ -1,0 +1,324 @@
+---
+title: "Covid-19 Tunisia Analysis"
+author: "Ons Hosni"
+date: "04/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+Chargement des données : Collecter les données des nombres  de cas de contamination officiels dans le monde et en Tunisie chaque jour.
+Data source : CSSEGISandData/COVID-19 
+```{r }
+library("data.table")
+confirmed <- fread(here::here("csse_covid_19_data", "csse_covid_19_time_series","time_series_covid19_confirmed_global.csv"))
+death <- fread(here::here("csse_covid_19_data", "csse_covid_19_time_series", "time_series_covid19_deaths_global.csv"))
+recovered <- fread(here::here("csse_covid_19_data", "csse_covid_19_time_series", "time_series_covid19_recovered_global.csv"))
+
+```
+
+On s'intéresse dans cette partie aux données relatives aux cas de contamination en Tunisie. On fait une extraction.
+
+```{r }
+#Chargement des librairies nécessaires : 
+library(lubridate)
+library(tidyverse)
+#Confirmed cases in Tunisia :
+drop_columns <- c("Country/Region", "Lat", "Long")
+cct <- confirmed %>%
+  filter(`Country/Region` == "Tunisia") %>%
+  select(-one_of(drop_columns)) %>%
+  pivot_longer(-`Province/State`, names_to = "date", values_to = "confirmed_counts") %>%
+  mutate(date = mdy(date)) %>%
+  rename(Province = `Province/State`)
+View(cct)
+#Death cases in Tunisia
+dct <- death %>%
+  filter(`Country/Region` == "Tunisia") %>%
+  select(-one_of(drop_columns)) %>%
+  pivot_longer(-`Province/State`, names_to = "date", values_to = "death_counts") %>%
+  mutate(date = mdy(date)) %>%
+  rename(Province = `Province/State`)
+
+View(dct)
+
+#Recovered cases in Tunisia : 
+rct <- recovered %>%
+  filter(`Country/Region` == "Tunisia") %>%
+  select(-one_of(drop_columns)) %>%
+  pivot_longer(-`Province/State`, names_to = "date", values_to = "recovered_counts") %>%
+  mutate(date = mdy(date)) %>%
+  rename(Province = `Province/State`)
+
+View(rct)
+
+#Binding them all : 
+all <- cbind(cct, dct, rct, by = "date") 
+View(all)
+#Drop duplicated columns : 
+all_clean<- all[,c(1:3, 6, 9)]
+View(all_clean)
+str(all_clean)
+summary(all_clean)
+
+```
+
+
+
+Représentation des données en Tunisie : du 22 Février jusqu’à 02 Avril
+
+```{r}
+all_clean<- all_clean%>%
+
+  mutate(death_counts = case_when(death_counts == "1" ~ "Yes",
+                                  TRUE ~ "No")) %>%
+  mutate(week_in_2020 = week(date)) 
+
+library(ggplot2)
+
+all_clean %>%
+  ggplot(aes(x = date, y = confirmed_counts, fill = factor(death_counts))) + 
+  geom_point(aes(), shape = 24, alpha = 0.5) +
+  scale_fill_manual(values = c("red", "yellow")) +
+  labs(title="COVID-19 observations in Tunisia until April 02, 2020", 
+      x="Time", y = "Count",
+       fill = "Deaths", size = "Recovered counts") 
+
+
+```
+
+Construction de la série temporelle : 
+
+```{r}
+ccts=cct[3]
+#Conversion en vecteur
+v=as.vector(t(ccts))
+#Construction de la série temporelle:
+confirmedts=ts(v,start=2020, frequency =365)
+str(confirmedts)
+summary(confirmedts)
+#Représentation de la série temporelle :
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia")
+#Explication : La série représente les cas de contaminations  en Tunisie (72 observations) de Février 2020 à Avril 2020 de min 0 cas est et de max 455 cas et les données de cette série sont représentées dans la courbe suivante :
+```
+
+Estimation de la tendance avec la régression simple : 
+
+```{r}
+#Première Méthode : Estimation de la tendance avec la régréssion simple  
+#On retire min si l'on veut que la serie commence par 0
+#On divise sur max si on veut que la derniere valeur soit 1
+t=time(confirmedts)
+t= (t-min(t))/max(t)
+#Création du modéle linéaire associé :
+regression_lineaire = lm(confirmedts~t)
+summary(regression_lineaire)
+#interprétation : #remarque:p_value =0.0000000009551 <0.05 
+#On rejete h0: La valeur est = 0 et on accepte H1 : il y a une tendance
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia")
+regression_lineaire.fit = ts(regression_lineaire$fitted.values, frequency = 365, start= 2020)
+lines(regression_lineaire.fit, col = "yellow", lwd=2)
+
+```
+
+
+
+2éme methode: Estimation de la tendance avec la regression polynomiale 
+
+```{r}
+t=time(confirmedts)
+t= (t-min(t))/max(t)
+s= t^2
+regression_polynomial= lm(confirmedts ~ s +t)
+
+summary(regression_polynomial)
+#p-value = < 0.00000000000000022 < 0.05 
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia ")
+regression_polynomial.fit= ts(regression_polynomial$fitted.values,start=c(2020,01,22),frequency =365)
+lines(regression_polynomial.fit, col='purple', lwd=2)
+```
+
+3éme méthode : Estimation de la tendance avec le Moving average (Moyenne Mobile): Méthode non paramétrique : n'admet pas de modéle
+
+```{r}
+
+detach("package:dplyr", unload=TRUE)
+```
+
+
+```{r}
+
+
+
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia")
+moving_average =  filter(confirmedts, method = "convolution", sides = 2, filter= array(1/2,dim = 2 ))
+moving_average = ts(moving_average, start = 2020, frequency = 365)
+
+
+lines(moving_average, col= 'blue', lwd= 2)
+```
+
+4éme Methode: Estimation de la tendance avec la methode Loess (polynomiale locale) : une méthode non paramétrique :n'admet pas de modèle
+
+```{r}
+t = 1:length(confirmedts)
+t = (t-min(t))/max(t)
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia")
+local_regression = loess(confirmedts~t)
+summary(local_regression)
+local_regression.fit = ts(local_regression$fitted, start = 2020, frequency = 365)
+lines(local_regression.fit, col = 'red', lwd= 2)
+
+```
+
+5éme méthode : Estimation de la tendance avec la methode Spline 
+
+```{r}
+library(mgcv)
+library(nlme)
+plot(confirmedts,xlab="Date", ylab="Numbes of confirmed cases", main="COVID-19 confirmed cases observations in Tunisia")
+gam.spl= gam(confirmedts~ s(t))
+gam.spl.fit = ts(gam.spl$fitted.values, start = 2020, frequency = 365)
+lines(gam.spl.fit, col = 'green', lwd= 2)
+
+```
+
+
+Toutes les représentations de la tendance : 
+
+```{r}
+toutes_les_valeurs = c(moving_average, local_regression.fit, regression_lineaire.fit, regression_polynomial.fit)
+mvav = array(data = "Moving Average", dim = length(moving_average) ) 
+locreg = array(data = "Regression Locale", dim = length(local_regression.fit) )
+linearreg = array(data ="Regression Linéaire", dim = length(regression_lineaire.fit))
+polyreg = array(data ="Regression polynomiale", dim = length(regression_polynomial.fit))
+
+labels = c(mvav, locreg, linearreg, polyreg)
+tableau = data.frame(time = rep(time(confirmedts),4),toutes_les_valeurs, labels)
+library(ggplot2)
+ggplot(data = tableau) + 
+  aes(x= time, y = toutes_les_valeurs, col = labels) + 
+  geom_line(size =1.5) + xlab('Days') + ggtitle("Les tendances détectées par les différentes méthodes")+
+  ylab("Number of confirmed cases") + theme_linedraw()
+```
+
+La détection de la saisonnalité : 
+
+```{r}
+library(TSA)
+confirmedts2=ts(v,start=2020, frequency =7)
+as.ts(confirmedts2)
+plot(confirmedts2)
+week = season(confirmedts2)  
+```
+
+1ére méthode : la détection de la saisonnalité avec le test ANOVA
+
+```{r}
+
+model = lm(confirmedts2~week-1)
+summary(model)
+#-> La fixation de Lundi(Monday), calcul de la moyenne puis recherche de la variabilité des autres jours de semaine par rapport à la première semaine   
+#R²= 0.1707 : Le modele ne résume pas bien le phénoméne 
+#=> Anova: un grand nombre d'observations donc pas une très bonne méthode à adopter 
+
+```
+
+
+2éme méthode : la détection de la saisonnalité avec la méthode sin-cos estimation 
+
+```{r}
+har1=harmonic(confirmedts2,1)
+model3= lm(confirmedts2~har1)
+summary(model3)
+```
+```{r}
+har2=harmonic(confirmedts,2)
+model4=lm(confirmedts~har2)
+summary(model4)
+```
+
+```{r}
+har3=harmonic(confirmedts,3)
+model5=lm(confirmedts~ har3)
+summary(model5)
+```
+
+Représentation graphique : 
+```{r}
+st1=coef(model)
+st2=fitted(model4)[1:7]
+st1
+st2
+plot(1:7, st1, lwd=2, col="blue" )
+```
+
+L'étude de la Tendance et La saisonnalité 
+#1ere méthode parametric estimation : 
+
+```{r}
+lm.fit= lm(confirmedts2~ t +s+ har1)
+summary(lm.fit)
+#Vérifier si les résidus suivent une loi normale 
+#Le but c'est de s'assurer que la distribition des résidus a une distribition normale,
+#ce qui peut etre déterminé en tracant les résidus en utilisant le probabilité de normalité
+residuals = ts(confirmedts2- fitted(lm.fit), start = 2020, frequency = 365)
+hist(residuals)
+qqnorm(residuals)
+qqline(residuals)
+```
+
+Application du test KPSS : test de stationnarité
+
+```{r}
+library(tseries)
+kpss.test(residuals)
+#p-value=0.1 
+#The p-value is greater than 0.05. The null hypothesis of stationarity around a trend is not rejected.
+```
+2éme methode non parametric estimation :
+```{r}
+library(gam)
+gam.trs.fit = gam(confirmedts2 ~ s(t)+har2)
+diff.gam = ts(confirmedts2 - fitted(gam.trs.fit), start = 2020, frequency = 365)
+plot(diff.gam, col ="red")
+acf(diff.gam)
+kpss.test(diff.gam)
+```
+The number of differences needed :
+```{r}
+library(forecast)
+forecast::ndiffs(confirmedts2, test = "kpss")
+```
+
+Elimination de la Tendance : 
+
+```{r}
+confirmedts2_notrend = diff(confirmedts2, lag = 1)
+plot(confirmedts2_notrend)
+```
+
+Elimination de la tendance et de la saisonalité 
+
+```{r}
+confirmedts2_notendnosais = diff(confirmedts2, lag=12)
+plot(confirmedts2_notendnosais)
+kpss.test(confirmedts2_notendnosais)
+#p-value=0.01 < 0.05 
+#On dessine la fonction díautocorrelation simple et la fonction d'autocorrelation partielle.
+acf(confirmedts2_notendnosais)
+# les autocorrélations simples sont presque toutes significativement différentes de zero et diminuent lentement. 
+pacf(confirmedts2_notendnosais)
+
+##La premiére autocorélation partielle (k=1) est significativement différente de zero au niveau de signification 0.5. Ce qui indique 
+#que la série n'est pas stationnaire
+
+```
+
+
+
